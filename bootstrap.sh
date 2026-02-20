@@ -2,7 +2,7 @@
 # openclaw-tailscale-bootstrap.sh
 # Run AFTER: zotail is configured + `openclaw configure` has been run.
 # Patches the default openclaw config so the gateway is reachable
-# via Tailscale (both TUI and Control UI in browser).
+# via Tailscale Serve (both TUI and Control UI in browser).
 set -euo pipefail
 
 CONFIG="${HOME}/.openclaw/openclaw.json"
@@ -14,30 +14,37 @@ if [ ! -f "$CONFIG" ]; then
   exit 1
 fi
 
-echo "Patching openclaw config for Tailscale access..."
+echo "Patching openclaw config for Tailscale Serve..."
 
-# Patch gateway config
+# Patch gateway config — use OpenClaw's native tailscale integration
+# instead of manually configuring tailscale serve.
+# Ref: https://docs.openclaw.ai/gateway/tailscale
 node -e "
   const fs = require('fs');
   const cfg = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
   const gw = cfg.gateway ??= {};
 
-  // Trust Tailscale identity headers on serve connections
+  // Bind to loopback only (required for tailscale serve mode)
+  gw.bind = 'loopback';
+
+  // Enable OpenClaw's native Tailscale Serve integration.
+  // The gateway will configure tailscale serve on startup
+  // and proxy HTTPS traffic from the tailnet to the local port.
+  gw.tailscale = { mode: 'serve' };
+
+  // Trust Tailscale identity headers — valid Tailscale Serve
+  // requests authenticate via x-forwarded-for + tailscale whois
+  // without needing a token or password.
   gw.auth ??= {};
   gw.auth.allowTailscale = true;
 
-  // Enable control UI
+  // Enable the browser Control UI
   gw.controlUi ??= {};
   gw.controlUi.enabled = true;
 
   // Remove invalid denyCommands entries (default config generates
   // names that don't match real command IDs, triggering audit warnings)
   if (gw.nodes?.denyCommands) delete gw.nodes.denyCommands;
-
-  // Trust localhost as a reverse proxy (Tailscale serve proxies
-  // HTTPS -> HTTP on loopback and forwards X-Forwarded-For).
-  // This lets the gateway recognize .ts.net Host headers as local.
-  gw.trustedProxies = ['127.0.0.1/32'];
 
   // Fix credentials dir permissions (create if missing)
   const credDir = process.env.HOME + '/.openclaw/credentials';
@@ -47,10 +54,11 @@ node -e "
   fs.writeFileSync(process.argv[1], JSON.stringify(cfg, null, 2) + '\n');
 " "$CONFIG"
 
+echo "  gateway.bind = loopback"
+echo "  gateway.tailscale.mode = serve"
 echo "  gateway.auth.allowTailscale = true"
 echo "  gateway.controlUi.enabled = true"
-echo "  gateway.trustedProxies = [\"127.0.0.1/32\"]"
-echo "  nodes.denyCommands -> removed (invalid defaults)"
+echo "  nodes.denyCommands -> removed"
 echo "  credentials dir -> 700"
 
 # Upgrade any existing paired devices to full admin scopes
@@ -74,6 +82,7 @@ fi
 [ -f "$PENDING" ] && echo '{}' > "$PENDING"
 
 # Restart gateway to pick up config changes.
+# The gateway will auto-configure tailscale serve on startup.
 # Do NOT use --force as it regenerates the gateway identity
 # and invalidates all existing device pairings.
 echo "Restarting gateway..."
@@ -87,17 +96,8 @@ if ! pgrep -f openclaw-gateway > /dev/null 2>&1; then
   exit 1
 fi
 
-# Read gateway port from config (default 18789)
-GW_PORT=$(node -pe "JSON.parse(require('fs').readFileSync('${CONFIG}','utf8')).gateway?.port ?? 18789")
+# Read token and resolve MagicDNS hostname
 TOKEN=$(node -pe "JSON.parse(require('fs').readFileSync('${CONFIG}','utf8')).gateway?.auth?.token ?? ''")
-
-# Set up tailscale serve to expose the gateway Control UI on the tailnet
-echo "Configuring Tailscale Serve..."
-tailscale serve --bg --https=443 "http://127.0.0.1:${GW_PORT}" 2>/dev/null && \
-  echo "  ✓ Tailscale Serve → localhost:${GW_PORT}" || \
-  echo "  Warning: could not configure tailscale serve"
-
-# Get the MagicDNS name for this machine
 TS_HOSTNAME=$(tailscale status --json 2>/dev/null | node -pe "
   const s = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
   (s.Self.DNSName || '').replace(/\\.\$/, '')
@@ -106,8 +106,12 @@ TS_HOSTNAME=$(tailscale status --json 2>/dev/null | node -pe "
 echo ""
 echo "Ready!"
 echo "  TUI:     openclaw tui"
-if [ -n "$TS_HOSTNAME" ] && [ -n "$TOKEN" ]; then
-  echo "  Browser: https://${TS_HOSTNAME}?token=${TOKEN}"
+if [ -n "$TS_HOSTNAME" ]; then
+  echo "  Browser: https://${TS_HOSTNAME}/"
+  if [ -n "$TOKEN" ]; then
+    echo "  (with token: https://${TS_HOSTNAME}/#token=${TOKEN})"
+  fi
   echo ""
   echo "  Accessible from any device on your tailnet."
+  echo "  Tailscale identity auth is enabled — no token needed for tailnet users."
 fi
