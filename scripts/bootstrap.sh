@@ -92,10 +92,12 @@ echo "Ready!"
 echo "  TUI:     openclaw tui"
 if [ -n "$TS_HOSTNAME" ]; then
   echo "  Browser: https://${TS_HOSTNAME}/"
-  if [ -n "$TOKEN" ]; then
-    echo "  (with token: https://${TS_HOSTNAME}/#token=${TOKEN})"
-  fi
   echo ""
-  echo "  Accessible from any device on your tailnet."
-  echo "  Tailscale identity auth is enabled — no token needed for tailnet users."
+  echo "  To access from another device on your tailnet:"
+  echo "    1. Open the URL above in your browser"
+  echo "    2. Run: openclaw devices list"
+  echo "    3. Run: openclaw devices approve <request-id>"
+  echo "    4. Refresh the browser"
+  echo ""
+  echo "  This is a one-time pairing per browser."
 fi
