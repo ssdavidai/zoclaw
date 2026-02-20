@@ -25,10 +25,10 @@ step 1 "Tailscale auth key"
 ensure_secrets_file
 source "$SECRETS_FILE" 2>/dev/null || true
 
-if [ -n "${TAILSCALE_AUTH_KEY:-}" ]; then
-  echo "  Found TAILSCALE_AUTH_KEY in zo secrets, using existing key."
+if [ -n "${TAILSCALE_AUTHKEY:-}" ]; then
+  echo "  Found TAILSCALE_AUTHKEY in zo secrets, using existing key."
 else
-  echo "  No TAILSCALE_AUTH_KEY found in zo secrets."
+  echo "  No TAILSCALE_AUTHKEY found in zo secrets."
   echo "  Generate one at: https://login.tailscale.com/admin/settings/keys"
   echo ""
   read -rp "  Enter your Tailscale auth key: " ts_key
@@ -36,8 +36,8 @@ else
     echo "  Error: auth key cannot be empty."
     exit 1
   fi
-  echo "export TAILSCALE_AUTH_KEY=\"${ts_key}\"" >> "$SECRETS_FILE"
-  export TAILSCALE_AUTH_KEY="$ts_key"
+  echo "export TAILSCALE_AUTHKEY=\"${ts_key}\"" >> "$SECRETS_FILE"
+  export TAILSCALE_AUTHKEY="$ts_key"
   echo "  Saved to zo secrets."
 fi
 
