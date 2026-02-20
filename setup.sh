@@ -6,6 +6,7 @@ set -euo pipefail
 SECRETS_FILE="${HOME}/.zo_secrets"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BOOTSTRAP="${SCRIPT_DIR}/bootstrap.sh"
+USER_SUPERVISOR="/etc/zo/supervisord-user.conf"
 
 # ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -75,9 +76,9 @@ else
   openclaw onboard --install-daemon
 fi
 
-# ─── Step 5: Bootstrap Tailscale config ──────────────────────────────
+# ─── Step 5: Bootstrap (config + secrets + service) ──────────────────
 
-step 5 "Tailscale bootstrap"
+step 5 "Bootstrap"
 
 if [ ! -f "$BOOTSTRAP" ]; then
   echo "  Error: bootstrap.sh not found at ${BOOTSTRAP}"
@@ -88,17 +89,23 @@ bash "$BOOTSTRAP"
 
 # ─── Done ────────────────────────────────────────────────────────────
 
-CONFIG="${HOME}/.openclaw/openclaw.json"
-TOKEN=$(node -pe "JSON.parse(require('fs').readFileSync('${CONFIG}','utf8')).gateway?.auth?.token ?? ''" 2>/dev/null || true)
-TS_URL=$(tailscale serve status 2>/dev/null | grep -oP 'https://\S+' | head -1 || true)
+TS_HOSTNAME=$(tailscale status --json 2>/dev/null | node -pe "
+  const s = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+  (s.Self.DNSName || '').replace(/\\\.\$/, '')
+" 2>/dev/null || true)
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "  Setup complete!"
 echo ""
-if [ -n "$TS_URL" ] && [ -n "$TOKEN" ]; then
-  echo "  Control UI: ${TS_URL}?token=${TOKEN}"
+echo "  Secrets:   /root/.zo_secrets"
+echo "  Workspace: /home/workspace/"
+echo "  Gateway:   managed by supervisord (user)"
+echo "  Manage:    supervisorctl -c $USER_SUPERVISOR restart openclaw-gateway"
+echo ""
+if [ -n "$TS_HOSTNAME" ]; then
+  echo "  Control UI: https://${TS_HOSTNAME}/"
   echo ""
   echo "  (On first browser load, approve device pairing from the CLI:"
   echo "   openclaw devices list && openclaw devices approve <id>)"
