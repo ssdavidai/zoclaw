@@ -99,12 +99,27 @@ if ! pgrep -f openclaw-gateway > /dev/null 2>&1; then
   exit 1
 fi
 
+# Read gateway port from config (default 18789)
+GW_PORT=$(node -pe "JSON.parse(require('fs').readFileSync('${CONFIG}','utf8')).gateway?.port ?? 18789")
 TOKEN=$(node -pe "JSON.parse(require('fs').readFileSync('${CONFIG}','utf8')).gateway?.auth?.token ?? ''")
-TS_URL=$(tailscale serve status 2>/dev/null | grep -oP 'https://\S+' | head -1 || true)
+
+# Set up tailscale serve to expose the gateway Control UI on the tailnet
+echo "Configuring Tailscale Serve..."
+tailscale serve --bg --https=443 "http://127.0.0.1:${GW_PORT}" 2>/dev/null && \
+  echo "  ✓ Tailscale Serve → localhost:${GW_PORT}" || \
+  echo "  Warning: could not configure tailscale serve"
+
+# Get the MagicDNS name for this machine
+TS_HOSTNAME=$(tailscale status --json 2>/dev/null | node -pe "
+  const s = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+  (s.Self.DNSName || '').replace(/\\.\$/, '')
+" 2>/dev/null || true)
 
 echo ""
 echo "Ready!"
 echo "  TUI:     openclaw tui"
-if [ -n "$TS_URL" ] && [ -n "$TOKEN" ]; then
-  echo "  Browser: ${TS_URL}?token=${TOKEN}"
+if [ -n "$TS_HOSTNAME" ] && [ -n "$TOKEN" ]; then
+  echo "  Browser: https://${TS_HOSTNAME}?token=${TOKEN}"
+  echo ""
+  echo "  Accessible from any device on your tailnet."
 fi
