@@ -7,6 +7,12 @@ Set up [OpenClaw](https://openclaw.ai) on a [Zo](https://zo.computer) instance w
 On a fresh Zo instance:
 
 ```bash
+npm install -g @ssdavidai/zoclaw && zoclaw init
+```
+
+Or via git:
+
+```bash
 git clone https://github.com/ssdavidai/zoclaw.git
 cd zoclaw
 ./setup.sh
@@ -61,8 +67,8 @@ The script does **not** set `allowInsecureAuth` or `dangerouslyDisableDeviceAuth
 
 | Script | Purpose |
 |---|---|
-| `setup.sh` | Full setup from scratch (Tailscale + OpenClaw + bootstrap) |
-| `bootstrap.sh` | Config patches only (if OpenClaw and Tailscale are already installed) |
+| `zoclaw init` | Full setup from scratch (Tailscale + OpenClaw + bootstrap) |
+| `zoclaw bootstrap` | Config patches only (if OpenClaw and Tailscale are already installed) |
 
 ## Security
 
