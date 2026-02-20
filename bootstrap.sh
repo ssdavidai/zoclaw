@@ -80,22 +80,55 @@ sleep 2
 openclaw gateway run --force > /dev/null 2>&1 &
 sleep 5
 
-# Verify
-if pgrep -f openclaw-gateway > /dev/null 2>&1; then
-  TOKEN=$(node -pe "JSON.parse(require('fs').readFileSync('${CONFIG}','utf8')).gateway?.auth?.token ?? ''")
-  TS_URL=$(tailscale serve status 2>/dev/null | grep -oP 'https://\S+' | head -1 || true)
-
-  echo ""
-  echo "Ready!"
-  echo "  TUI:     openclaw tui"
-  if [ -n "$TS_URL" ] && [ -n "$TOKEN" ]; then
-    echo "  Browser: ${TS_URL}?token=${TOKEN}"
-    echo ""
-    echo "  On first browser load, the Control UI will request device pairing."
-    echo "  Approve it from the TUI or CLI:"
-    echo "    openclaw devices list"
-    echo "    openclaw devices approve <request-id>"
-  fi
-else
+# Verify gateway is running
+if ! pgrep -f openclaw-gateway > /dev/null 2>&1; then
   echo "Warning: gateway did not start. Check 'openclaw gateway run --force' manually."
+  exit 1
+fi
+
+# Auto-pair: trigger a connection attempt to generate a pending request,
+# then approve all pending devices so the TUI can connect immediately.
+echo "Setting up device pairing..."
+timeout 3 openclaw tui 2>/dev/null &
+sleep 3
+
+if [ -f "$PENDING" ]; then
+  node -e "
+    const fs = require('fs');
+    const pendingFile = process.argv[1];
+    const pairedFile = process.argv[2];
+    const pending = JSON.parse(fs.readFileSync(pendingFile, 'utf8'));
+    let paired = {};
+    try { paired = JSON.parse(fs.readFileSync(pairedFile, 'utf8')); } catch {}
+    const scopes = ['operator.read','operator.admin','operator.approvals','operator.pairing'];
+    let count = 0;
+    for (const [id, dev] of Object.entries(pending)) {
+      dev.scopes = scopes;
+      paired[id] = dev;
+      count++;
+    }
+    if (count > 0) {
+      fs.writeFileSync(pairedFile, JSON.stringify(paired, null, 2) + '\n');
+      fs.writeFileSync(pendingFile, '{}');
+      console.log('  ✓ Auto-approved ' + count + ' device(s)');
+    } else {
+      console.log('  No pending devices to approve');
+    }
+  " "$PENDING" "$PAIRED"
+fi
+
+# Restart gateway again to pick up new pairings
+pkill -f openclaw-gateway 2>/dev/null || true
+sleep 2
+openclaw gateway run --force > /dev/null 2>&1 &
+sleep 3
+
+TOKEN=$(node -pe "JSON.parse(require('fs').readFileSync('${CONFIG}','utf8')).gateway?.auth?.token ?? ''")
+TS_URL=$(tailscale serve status 2>/dev/null | grep -oP 'https://\S+' | head -1 || true)
+
+echo ""
+echo "Ready!"
+echo "  TUI:     openclaw tui"
+if [ -n "$TS_URL" ] && [ -n "$TOKEN" ]; then
+  echo "  Browser: ${TS_URL}?token=${TOKEN}"
 fi
