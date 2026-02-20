@@ -73,26 +73,14 @@ fi
 # Clear stale pairing requests
 [ -f "$PENDING" ] && echo '{}' > "$PENDING"
 
-# Reload gateway with SIGHUP to pick up config changes without
-# losing device pairings. Fall back to graceful restart (without
-# --force) if the gateway isn't running yet.
-echo "Reloading gateway config..."
-if pkill -HUP -f openclaw-gateway 2>/dev/null; then
-  sleep 2
-  echo "  ✓ Gateway reloaded"
-elif pgrep -f openclaw-gateway > /dev/null 2>&1; then
-  # Process exists but SIGHUP failed — graceful restart
-  pkill -f openclaw-gateway 2>/dev/null || true
-  sleep 2
-  openclaw gateway run > /dev/null 2>&1 &
-  sleep 5
-  echo "  ✓ Gateway restarted"
-else
-  # No gateway running — start fresh
-  openclaw gateway run > /dev/null 2>&1 &
-  sleep 5
-  echo "  ✓ Gateway started"
-fi
+# Restart gateway to pick up config changes.
+# Do NOT use --force as it regenerates the gateway identity
+# and invalidates all existing device pairings.
+echo "Restarting gateway..."
+pkill -f openclaw-gateway 2>/dev/null || true
+sleep 2
+openclaw gateway run > /dev/null 2>&1 &
+sleep 5
 
 if ! pgrep -f openclaw-gateway > /dev/null 2>&1; then
   echo "Warning: gateway is not running. Try 'openclaw gateway run' manually."
