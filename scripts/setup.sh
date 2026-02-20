@@ -55,17 +55,25 @@ zotail setup
 
 step 3 "OpenClaw"
 
-echo "  Installing openclaw..."
-npm install -g openclaw@latest 2>&1 | tail -1
+if command -v openclaw &>/dev/null; then
+  echo "  ✓ openclaw already installed ($(openclaw --version 2>/dev/null || echo 'unknown version'))"
+else
+  echo "  Installing openclaw..."
+  npm install -g openclaw@latest 2>&1 | tail -1
+fi
 
 # ─── Step 4: OpenClaw onboarding ─────────────────────────────────────
 
 step 4 "OpenClaw onboarding"
 
-echo "  Running interactive setup..."
-echo "  (When the onboarding finishes, setup will continue automatically.)"
-echo ""
-openclaw onboard --install-daemon
+if [ -f "${HOME}/.openclaw/openclaw.json" ]; then
+  echo "  ✓ OpenClaw already configured, skipping onboarding."
+else
+  echo "  Running interactive setup..."
+  echo "  (When the onboarding finishes, setup will continue automatically.)"
+  echo ""
+  openclaw onboard --install-daemon
+fi
 
 # ─── Step 5: Bootstrap Tailscale config ──────────────────────────────
 
