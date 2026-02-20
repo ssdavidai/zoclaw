@@ -1,6 +1,6 @@
 {
   "name": "@ssdavidai/zoclaw",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Set up OpenClaw on Zo with Tailscale access in one command",
   "license": "MIT",
   "repository": {

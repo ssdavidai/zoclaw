@@ -39,8 +39,10 @@ node -e "
   // This lets the gateway recognize .ts.net Host headers as local.
   gw.trustedProxies = ['127.0.0.1/32'];
 
-  // Fix credentials dir permissions
-  fs.chmodSync(process.env.HOME + '/.openclaw/credentials', 0o700);
+  // Fix credentials dir permissions (create if missing)
+  const credDir = process.env.HOME + '/.openclaw/credentials';
+  if (!fs.existsSync(credDir)) fs.mkdirSync(credDir, { recursive: true, mode: 0o700 });
+  else fs.chmodSync(credDir, 0o700);
 
   fs.writeFileSync(process.argv[1], JSON.stringify(cfg, null, 2) + '\n');
 " "$CONFIG"
