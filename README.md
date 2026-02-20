@@ -1,10 +1,40 @@
 # zoclaw
 
-Bootstrap script for running [OpenClaw](https://openclaw.ai) on a [Zo](https://zo.computer) instance with Tailscale access.
+Set up [OpenClaw](https://openclaw.ai) on a [Zo](https://zo.computer) instance with Tailscale access in one command.
 
-## The problem
+## Quick start
 
-After a fresh `openclaw configure` on Zo, the default gateway config doesn't work properly with Tailscale. You'll hit a series of issues:
+On a fresh Zo instance:
+
+```bash
+git clone https://github.com/ssdavidai/zoclaw.git
+cd zoclaw
+./setup.sh
+```
+
+That's it. The setup script walks you through everything:
+
+1. Prompts for your Tailscale auth key (or uses the one already in zo secrets)
+2. Installs and configures Tailscale via [zotail](https://github.com/ssdavidai/zotail)
+3. Installs OpenClaw
+4. Runs the OpenClaw onboarding wizard
+5. Patches the config for secure Tailscale access
+6. Prints your Control UI URL and offers to launch the TUI
+
+### After setup
+
+On first browser load, the Control UI will request device pairing. Approve it once from the CLI:
+
+```bash
+openclaw devices list
+openclaw devices approve <request-id>
+```
+
+After that, the browser is permanently paired.
+
+## Why this exists
+
+After a fresh `openclaw configure` on Zo, the default gateway config doesn't work with Tailscale. You'll hit a series of issues:
 
 1. **"requires HTTPS or localhost"** -- Tailscale Serve terminates TLS externally and proxies to the gateway as plain HTTP on loopback. The gateway sees a localhost socket but a non-local `Host` header (your `.ts.net` hostname), so it treats the connection as remote and rejects it.
 
@@ -14,7 +44,7 @@ After a fresh `openclaw configure` on Zo, the default gateway config doesn't wor
 
 4. **Security audit failures** -- The default config ships with invalid `denyCommands` entries and overly permissive credentials directory permissions.
 
-## What the bootstrap script does
+## What the bootstrap patches
 
 | Issue | Fix |
 |---|---|
@@ -27,79 +57,16 @@ After a fresh `openclaw configure` on Zo, the default gateway config doesn't wor
 
 The script does **not** set `allowInsecureAuth` or `dangerouslyDisableDeviceAuth` -- those are insecure workarounds. Instead, it configures `trustedProxies` so the gateway properly recognizes Tailscale Serve connections as secure, and the browser goes through proper Ed25519 device pairing.
 
-## Prerequisites
+## Scripts
 
-- A Zo computer instance
-- Tailscale configured via [zotail](https://github.com/nichochar/zo-tailscale) (auth key in zo secrets, installed and running)
-- OpenClaw installed and `openclaw configure` already run
-
-## Usage
-
-```bash
-# Clone
-git clone https://github.com/ssdavidai/zoclaw.git
-cd zoclaw
-
-# Run the bootstrap
-./bootstrap.sh
-```
-
-The script will output something like:
-
-```
-Patching openclaw config for Tailscale access...
-  gateway.auth.allowTailscale = true
-  gateway.controlUi.enabled = true
-  nodes.denyCommands -> removed (invalid defaults)
-  gateway.trustedProxies = ["127.0.0.1/32"]
-  credentials dir -> 700
-  Upgraded paired device scopes to full admin
-Restarting gateway...
-
-Ready!
-  TUI:     openclaw tui
-  Browser: https://your-machine.tailnet-name.ts.net/?token=your-token
-```
-
-### After running the script
-
-**TUI** works immediately:
-
-```bash
-openclaw tui
-```
-
-**Browser** -- open the URL the script prints (includes `?token=...`). On first load, the Control UI will request device pairing. Approve it once from the CLI:
-
-```bash
-openclaw devices list
-openclaw devices approve <request-id>
-```
-
-After approving, the browser is permanently paired. The token is saved in browser localStorage so you won't need the `?token=` parameter again.
-
-## Full setup from scratch
-
-```bash
-# 1. Install OpenClaw
-npm install -g openclaw
-openclaw configure
-
-# 2. Set up Tailscale (add TAILSCALE_AUTH_KEY to zo secrets first)
-# See: https://github.com/nichochar/zo-tailscale
-
-# 3. Run the bootstrap
-git clone https://github.com/ssdavidai/zoclaw.git
-./zoclaw/bootstrap.sh
-
-# 4. Use it
-openclaw tui                           # terminal UI
-# or open the browser URL from step 3 output
-```
+| Script | Purpose |
+|---|---|
+| `setup.sh` | Full setup from scratch (Tailscale + OpenClaw + bootstrap) |
+| `bootstrap.sh` | Config patches only (if OpenClaw and Tailscale are already installed) |
 
 ## Security
 
-Running `openclaw security audit` after bootstrap should show **0 critical findings**. The script uses `trustedProxies` + proper device pairing instead of insecure bypasses.
+Running `openclaw security audit` after setup should show **0 critical findings**. The setup uses `trustedProxies` + proper device pairing instead of insecure bypasses.
 
 ## License
 
