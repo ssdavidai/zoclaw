@@ -6,8 +6,6 @@
 set -euo pipefail
 
 CONFIG="${HOME}/.openclaw/openclaw.json"
-PAIRED="${HOME}/.openclaw/devices/paired.json"
-PENDING="${HOME}/.openclaw/devices/pending.json"
 
 if [ ! -f "$CONFIG" ]; then
   echo "Error: $CONFIG not found. Run 'openclaw configure' first."
@@ -16,8 +14,7 @@ fi
 
 echo "Patching openclaw config for Tailscale Serve..."
 
-# Patch gateway config — use OpenClaw's native tailscale integration
-# instead of manually configuring tailscale serve.
+# Patch gateway config — use OpenClaw's native tailscale integration.
 # Ref: https://docs.openclaw.ai/gateway/tailscale
 node -e "
   const fs = require('fs');
@@ -31,6 +28,12 @@ node -e "
   // The gateway will configure tailscale serve on startup
   // and proxy HTTPS traffic from the tailnet to the local port.
   gw.tailscale = { mode: 'serve' };
+
+  // Trust localhost as a reverse proxy. Tailscale Serve connects
+  // to the gateway on 127.0.0.1 and adds x-forwarded-for headers.
+  // Without this, the gateway ignores proxy headers and can't
+  // resolve the caller's Tailscale identity.
+  gw.trustedProxies = ['127.0.0.1/32'];
 
   // Trust Tailscale identity headers — valid Tailscale Serve
   // requests authenticate via x-forwarded-for + tailscale whois
@@ -56,30 +59,11 @@ node -e "
 
 echo "  gateway.bind = loopback"
 echo "  gateway.tailscale.mode = serve"
+echo "  gateway.trustedProxies = [127.0.0.1/32]"
 echo "  gateway.auth.allowTailscale = true"
 echo "  gateway.controlUi.enabled = true"
 echo "  nodes.denyCommands -> removed"
 echo "  credentials dir -> 700"
-
-# Upgrade any existing paired devices to full admin scopes
-if [ -f "$PAIRED" ]; then
-  node -e "
-    const fs = require('fs');
-    const paired = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
-    const scopes = ['operator.read','operator.admin','operator.approvals','operator.pairing'];
-    for (const dev of Object.values(paired)) {
-      dev.clientId = 'cli';
-      dev.clientMode = 'cli';
-      dev.scopes = scopes;
-      for (const tok of Object.values(dev.tokens ?? {})) tok.scopes = scopes;
-    }
-    fs.writeFileSync(process.argv[1], JSON.stringify(paired, null, 2) + '\n');
-  " "$PAIRED"
-  echo "  Upgraded paired device scopes to full admin"
-fi
-
-# Clear stale pairing requests
-[ -f "$PENDING" ] && echo '{}' > "$PENDING"
 
 # Restart gateway to pick up config changes.
 # The gateway will auto-configure tailscale serve on startup.
