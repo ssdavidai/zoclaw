@@ -1,108 +1,92 @@
 # zoclaw
 
-Set up [OpenClaw](https://openclaw.ai) on a [Zo](https://zo.computer) instance with Tailscale access in one command.
+Run AI agents on your [Zo](https://zo.computer) machine and control them from anywhere on your private network.
+
+zoclaw connects [OpenClaw](https://openclaw.ai) (an open-source AI agent platform) to [Tailscale](https://tailscale.com) (a private mesh VPN) on a Zo machine. After setup, you get:
+
+- **A terminal UI** to chat with your AI agent over SSH or directly on the machine
+- **A browser Control UI** accessible from any device on your tailnet (laptop, phone, tablet) — no port forwarding, no public exposure
+- **A supervised gateway** that auto-restarts on crash or container reboot
+- **Zo-native secrets management** — API keys and tokens stored in `/root/.zo_secrets`, not scattered across config files
 
 ## Quick start
 
-On a fresh Zo instance:
-
 ```bash
-npm install -g @ssdavidai/zoclaw && zoclaw init
+npm install -g @ssdavidai/zoclaw
+zoclaw init
 ```
 
-For the development channel:
+The setup walks you through five steps:
 
-```bash
-npm install -g @ssdavidai/zoclaw@next && zoclaw init --next
-```
+1. **Tailscale auth key** — prompts for one, or reuses the key already in zo secrets
+2. **Tailscale install** — sets up the VPN sidecar via [zotail](https://github.com/ssdavidai/zotail)
+3. **OpenClaw install** — installs the agent platform
+4. **Onboarding** — interactive wizard to pick your AI provider and model
+5. **Bootstrap** — configures the gateway for secure tailnet access and registers it as a service
 
-The `--next` flag installs `@next` versions of dependencies (like [zotail](https://github.com/ssdavidai/zotail)). Without it, stable `@latest` versions are used.
+At the end, you'll see your Control UI URL and can launch the TUI immediately.
 
-## What it does
+### First browser connection
 
-The setup script walks you through everything:
-
-1. Prompts for your Tailscale auth key (or uses the one already in zo secrets)
-2. Installs and configures Tailscale via [zotail](https://github.com/ssdavidai/zotail)
-3. Installs OpenClaw
-4. Runs the OpenClaw onboarding wizard
-5. Bootstraps the gateway config, migrates secrets, and registers the gateway as a supervised service
-
-### After setup
-
-- **Gateway** is managed by supervisord — it auto-restarts on crash or container reboot
-- **Secrets** (gateway token, API keys) are stored in `/root/.zo_secrets`
-- **Workspace** is set to `/home/workspace/`
-- **Control UI** is accessible from any device on your tailnet
-
-On first browser load, the Control UI will request device pairing. Approve it once from the CLI:
+The first time you open the Control UI from another device on your tailnet, you need to approve the device once:
 
 ```bash
 openclaw devices list
 openclaw devices approve <request-id>
 ```
 
-After that, the browser is permanently paired.
+Refresh the browser and you're in. This is a one-time step per device.
 
-### Managing the gateway
+## Development channel
+
+To test in-development versions:
 
 ```bash
-# Status
+npm install -g @ssdavidai/zoclaw@next
+zoclaw init --next
+```
+
+The `--next` flag pulls `@next` versions of dependencies. Without it, stable `@latest` versions are used.
+
+## Managing the gateway
+
+The gateway runs as a supervised service — it starts automatically and restarts on failure.
+
+```bash
+# Check status
 supervisorctl -c /etc/zo/supervisord-user.conf status openclaw-gateway
 
 # Restart
 supervisorctl -c /etc/zo/supervisord-user.conf restart openclaw-gateway
 
-# Logs
-tail /dev/shm/openclaw-gateway.log /dev/shm/openclaw-gateway_err.log
+# View logs
+tail /dev/shm/openclaw-gateway.log
 ```
 
-## Why this exists
+## How it works
 
-After a fresh `openclaw configure` on Zo, the default gateway config doesn't work with Tailscale. You'll hit a series of issues:
+A fresh `openclaw configure` on Zo doesn't work with Tailscale out of the box. Tailscale Serve terminates TLS on the edge and proxies to your gateway as plain HTTP on loopback. The gateway sees a localhost socket but a remote-looking `Host` header (your `.ts.net` hostname), misclassifies the connection, and rejects it.
 
-1. **"requires HTTPS or localhost"** -- Tailscale Serve terminates TLS externally and proxies to the gateway as plain HTTP on loopback. The gateway sees a localhost socket but a non-local `Host` header (your `.ts.net` hostname), so it treats the connection as remote and rejects it.
+zoclaw fixes this by patching the gateway config to:
 
-2. **"device identity required"** -- The Control UI in the browser needs to complete device pairing, but the gateway doesn't recognize the browser as a trusted client without proper proxy configuration.
+- Use OpenClaw's native Tailscale Serve integration (`gateway.tailscale.mode: "serve"`)
+- Trust Tailscale identity headers for browser connections (`gateway.auth.allowTailscale`)
+- Trust localhost as a reverse proxy (`gateway.trustedProxies`) so forwarded headers are honored
+- Enable the browser Control UI
+- Set the agent workspace to `/home/workspace/` (Zo standard)
+- Migrate secrets (gateway token, API keys) to zo secrets
 
-3. **Security audit failures** -- The default config ships with invalid `denyCommands` entries and overly permissive credentials directory permissions.
+The bootstrap uses a **two-phase restart** because `trustedProxies` and local device auto-pairing conflict. When `127.0.0.1` is listed as a trusted proxy, the gateway treats direct CLI connections as proxy traffic and can't auto-pair them. So the bootstrap starts the gateway *without* `trustedProxies` first (allowing the local CLI to auto-pair), then adds it and restarts.
 
-## What the bootstrap patches
+No insecure flags (`allowInsecureAuth`, `dangerouslyDisableDeviceAuth`) are used. Browser access goes through proper Ed25519 device pairing.
 
-| Setting | Value | Why |
-|---|---|---|
-| `gateway.bind` | `loopback` | Required for Tailscale Serve mode |
-| `gateway.tailscale.mode` | `serve` | Native Tailscale Serve integration |
-| `gateway.trustedProxies` | `["127.0.0.1/32"]` | Trust Tailscale Serve's forwarded headers (added in phase 2, after local device auto-pairs) |
-| `gateway.auth.mode` | `token` | Token-based auth for CLI/TUI connections |
-| `gateway.auth.allowTailscale` | `true` | Trust Tailscale identity for browser access |
-| `gateway.controlUi.enabled` | `true` | Enable browser Control UI |
-| `gateway.nodes.denyCommands` | removed | Default entries are invalid and trigger audit warnings |
-| `agents.defaults.workspace` | `/home/workspace/` | Zo standard workspace |
-| `credentials dir` | `chmod 700` | Fix permissions |
+## Commands
 
-### Two-phase trustedProxies
-
-The bootstrap uses a two-phase approach because `trustedProxies` and local auto-pairing conflict:
-
-- **Phase 1**: Apply everything *except* `trustedProxies` → start gateway → local CLI connects from 127.0.0.1 → gateway sees direct local client → auto-pairs silently
-- **Phase 2**: Add `trustedProxies` → restart gateway → Tailscale Serve gets proper IP resolution, and the CLI is already paired
-
-Without this split, `trustedProxies` causes the gateway to treat direct loopback connections as reverse-proxy traffic. Since the CLI doesn't send `x-forwarded-for` headers, the gateway can't resolve the client IP, `isLocalClient` becomes false, and the auto-pair mechanism never fires — locking out all CLI tools.
-
-The script does **not** set `allowInsecureAuth` or `dangerouslyDisableDeviceAuth`. Instead, it uses `trustedProxies` so the gateway properly recognizes Tailscale Serve connections as secure, and the browser goes through proper Ed25519 device pairing.
-
-## Scripts
-
-| Command | Purpose |
+| Command | What it does |
 |---|---|
-| `zoclaw init` | Full setup from scratch (Tailscale + OpenClaw + bootstrap) |
-| `zoclaw init --next` | Same, but uses `@next` channel for dependencies |
-| `zoclaw bootstrap` | Config patches only (if OpenClaw and Tailscale are already installed) |
-
-## Security
-
-Running `openclaw security audit` after setup should show **0 critical findings**. The setup uses `trustedProxies` + proper device pairing instead of insecure bypasses.
+| `zoclaw init` | Full setup from scratch |
+| `zoclaw init --next` | Full setup using development channel |
+| `zoclaw bootstrap` | Re-apply config patches only (if already installed) |
 
 ## License
 
