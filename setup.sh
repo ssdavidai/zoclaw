@@ -47,7 +47,7 @@ fi
 step 2 "Tailscale (zotail)"
 
 echo "  Installing zotail..."
-npm install -g @ssdavidai/zotail 2>&1 | tail -1
+npm install -g @ssdavidai/zotail@next 2>&1 | tail -1
 
 echo "  Running zotail setup..."
 zotail setup
