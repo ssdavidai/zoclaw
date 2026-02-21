@@ -123,6 +123,21 @@ else
   echo "  No OpenRouter API key found (skipping)"
 fi
 
+# Ensure future shell sessions source zo_secrets (for OPENCLAW_GATEWAY_TOKEN).
+# The CLI tools (tui, devices list, etc.) need this env var to authenticate
+# to the gateway — without it they get "pairing required".
+for rc in "${HOME}/.bashrc" "${HOME}/.zshrc"; do
+  if [ -f "$rc" ] && ! grep -q 'source.*\.zo_secrets' "$rc" 2>/dev/null; then
+    echo "" >> "$rc"
+    echo '# Zo secrets (API keys, tokens)' >> "$rc"
+    echo 'source ~/.zo_secrets 2>/dev/null || true' >> "$rc"
+    echo "  Added 'source ~/.zo_secrets' to $(basename "$rc")"
+  fi
+done
+
+# Source now so the rest of this script has the env vars
+source "$SECRETS_FILE" 2>/dev/null || true
+
 # ─── 3. Register gateway as Zo user service ───────────────────────────
 
 echo ""

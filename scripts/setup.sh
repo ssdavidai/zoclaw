@@ -118,6 +118,9 @@ echo ""
 read -rp "  Launch the TUI now? [Y/n] " launch_tui
 launch_tui="${launch_tui:-Y}"
 
+# Source zo_secrets so OPENCLAW_GATEWAY_TOKEN is available for CLI tools
+source "$SECRETS_FILE" 2>/dev/null || true
+
 if [[ "$launch_tui" =~ ^[Yy]$ ]]; then
   exec openclaw tui
 else
