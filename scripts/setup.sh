@@ -73,7 +73,7 @@ else
   echo "  Running interactive setup..."
   echo "  (When the onboarding finishes, setup will continue automatically.)"
   echo ""
-  openclaw onboard --install-daemon
+  openclaw onboard --skip-daemon
 fi
 
 # ─── Step 5: Bootstrap (config + secrets + service) ──────────────────
