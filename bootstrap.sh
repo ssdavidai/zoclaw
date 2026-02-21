@@ -138,7 +138,7 @@ sleep 1
 if ! grep -q "\[program:openclaw-gateway\]" "$USER_SUPERVISOR" 2>/dev/null; then
   cat >> "$USER_SUPERVISOR" << 'SUPERVISOR'
 [program:openclaw-gateway]
-command=bash -c 'source ~/.zo_secrets 2>/dev/null; exec openclaw gateway run'
+command=bash -c 'source ~/.zo_secrets 2>/dev/null; unset OPENCLAW_GATEWAY_TOKEN; exec openclaw gateway run'
 directory=/home/workspace
 autostart=true
 autorestart=true
