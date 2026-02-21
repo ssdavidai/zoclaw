@@ -7,6 +7,7 @@ SECRETS_FILE="${HOME}/.zo_secrets"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BOOTSTRAP="${SCRIPT_DIR}/bootstrap.sh"
 USER_SUPERVISOR="/etc/zo/supervisord-user.conf"
+NPM_TAG="${ZOCLAW_CHANNEL:-latest}"
 
 # ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -46,8 +47,8 @@ fi
 
 step 2 "Tailscale (zotail)"
 
-echo "  Installing zotail..."
-npm install -g @ssdavidai/zotail@next 2>&1 | tail -1
+echo "  Installing zotail@${NPM_TAG}..."
+npm install -g "@ssdavidai/zotail@${NPM_TAG}" 2>&1 | tail -1
 
 echo "  Running zotail setup..."
 zotail setup
