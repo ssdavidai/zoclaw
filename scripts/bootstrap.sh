@@ -5,6 +5,17 @@
 # via Tailscale Serve (both TUI and Control UI in browser).
 # Also migrates secrets to Zo secrets and registers gateway as a
 # Zo user service (supervisord).
+#
+# IMPORTANT: trustedProxies must be added AFTER the local device has
+# auto-paired. When trustedProxies includes 127.0.0.1/32, the gateway
+# treats direct loopback connections as reverse-proxy traffic and looks
+# for x-forwarded-for headers. Direct CLI connections don't send those
+# headers, so the gateway can't resolve their IP → isLocalClient=false
+# → the built-in local auto-pair never fires → deadlock.
+#
+# The fix: two-phase config patching.
+#   Phase 1: Everything except trustedProxies → start gateway → auto-pair
+#   Phase 2: Add trustedProxies → restart gateway
 set -euo pipefail
 
 CONFIG="${HOME}/.openclaw/openclaw.json"
@@ -16,9 +27,9 @@ if [ ! -f "$CONFIG" ]; then
   exit 1
 fi
 
-# ─── 1. Patch openclaw config ─────────────────────────────────────────
+# ─── 1. Patch config (Phase 1: without trustedProxies) ────────────────
 
-echo "Patching openclaw config for Tailscale Serve..."
+echo "Patching openclaw config (phase 1)..."
 
 node -e "
   const fs = require('fs');
@@ -26,18 +37,13 @@ node -e "
   const cfg = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
   const gw = cfg.gateway ??= {};
 
-  // Bind to loopback only (required for tailscale serve mode)
   gw.bind = 'loopback';
-
-  // Enable OpenClaw's native Tailscale Serve integration.
   gw.tailscale = { mode: 'serve' };
 
-  // Trust localhost as reverse proxy (Tailscale Serve → loopback).
-  gw.trustedProxies = ['127.0.0.1/32'];
+  // Do NOT set trustedProxies yet — local auto-pair must happen first.
+  // If a previous run left it in, remove it.
+  delete gw.trustedProxies;
 
-  // Ensure token auth is configured. The gateway token is how CLI
-  // tools (tui, devices list, etc.) authenticate over WebSocket.
-  // Without this, the gateway rejects all connections as 'pairing required'.
   gw.auth ??= {};
   gw.auth.mode = 'token';
   if (!gw.auth.token) {
@@ -46,24 +52,17 @@ node -e "
   } else {
     console.log('  gateway.auth.token -> preserved');
   }
-
-  // Trust Tailscale identity headers for browser access via Serve.
   gw.auth.allowTailscale = true;
 
-  // Enable the browser Control UI
   gw.controlUi ??= {};
   gw.controlUi.enabled = true;
 
-  // Remove invalid denyCommands (default config generates names
-  // that don't match real command IDs, triggering audit warnings)
   if (gw.nodes?.denyCommands) delete gw.nodes.denyCommands;
 
-  // Set workspace to /home/workspace/ (Zo standard workspace)
   cfg.agents ??= {};
   cfg.agents.defaults ??= {};
   cfg.agents.defaults.workspace = '/home/workspace/';
 
-  // Fix credentials dir permissions (create if missing)
   const credDir = process.env.HOME + '/.openclaw/credentials';
   if (!fs.existsSync(credDir)) fs.mkdirSync(credDir, { recursive: true, mode: 0o700 });
   else fs.chmodSync(credDir, 0o700);
@@ -73,7 +72,7 @@ node -e "
 
 echo "  gateway.bind = loopback"
 echo "  gateway.tailscale.mode = serve"
-echo "  gateway.trustedProxies = [127.0.0.1/32]"
+echo "  gateway.trustedProxies = (deferred to phase 2)"
 echo "  gateway.auth.mode = token"
 echo "  gateway.auth.allowTailscale = true"
 echo "  gateway.controlUi.enabled = true"
@@ -84,10 +83,8 @@ echo "  agents.defaults.workspace = /home/workspace/"
 echo ""
 echo "Migrating secrets to Zo secrets..."
 
-# Extract gateway token from (now-patched) openclaw config
 GW_TOKEN=$(node -pe "JSON.parse(require('fs').readFileSync('${CONFIG}','utf8')).gateway?.auth?.token ?? ''" 2>/dev/null || true)
 
-# Extract OpenRouter API key from agent auth profiles
 AGENT_AUTH="${HOME}/.openclaw/agents/main/agent/auth-profiles.json"
 OR_KEY=""
 if [ -f "$AGENT_AUTH" ]; then
@@ -98,7 +95,6 @@ if [ -f "$AGENT_AUTH" ]; then
   " 2>/dev/null || true)
 fi
 
-# Helper: add or update a key in zo_secrets
 upsert_secret() {
   local key="$1" val="$2"
   if [ -z "$val" ]; then return; fi
@@ -124,8 +120,6 @@ else
 fi
 
 # Ensure future shell sessions source zo_secrets (for OPENCLAW_GATEWAY_TOKEN).
-# The CLI tools (tui, devices list, etc.) need this env var to authenticate
-# to the gateway — without it they get "pairing required".
 for rc in "${HOME}/.bashrc" "${HOME}/.zshrc"; do
   if [ -f "$rc" ] && ! grep -q 'source.*\.zo_secrets' "$rc" 2>/dev/null; then
     echo "" >> "$rc"
@@ -135,7 +129,6 @@ for rc in "${HOME}/.bashrc" "${HOME}/.zshrc"; do
   fi
 done
 
-# Source now so the rest of this script has the env vars
 source "$SECRETS_FILE" 2>/dev/null || true
 
 # ─── 3. Register gateway as Zo user service ───────────────────────────
@@ -143,20 +136,12 @@ source "$SECRETS_FILE" 2>/dev/null || true
 echo ""
 echo "Registering gateway as Zo user service..."
 
-# Remove any openclaw daemon (from --install-daemon during onboarding)
-# that would conflict with our supervisor-managed gateway.
 openclaw daemon uninstall 2>/dev/null || true
 
-# Kill any existing background gateway process
 pkill -f "openclaw gateway run" 2>/dev/null || true
 pkill -f "openclaw-gateway" 2>/dev/null || true
 sleep 1
 
-# Add [program:openclaw-gateway] to user supervisor config if not present.
-# The gateway reads its config (including auth token) from ~/.openclaw/openclaw.json.
-# We do NOT pass OPENCLAW_GATEWAY_TOKEN via env — that would override
-# the config file token and is only needed for the gateway startup, not
-# for CLI tools that read the token from the same config file.
 if ! grep -q "\[program:openclaw-gateway\]" "$USER_SUPERVISOR" 2>/dev/null; then
   cat >> "$USER_SUPERVISOR" << 'SUPERVISOR'
 [program:openclaw-gateway]
@@ -181,17 +166,47 @@ else
   echo "  [program:openclaw-gateway] already in user supervisor"
 fi
 
-# Reload supervisor config and start/restart the gateway
+# ─── 4. Phase 1: Start gateway, auto-pair local device ───────────────
+
+echo ""
+echo "Starting gateway (phase 1: local device pairing)..."
+
 supervisorctl -c "$USER_SUPERVISOR" reread > /dev/null 2>&1 || true
 supervisorctl -c "$USER_SUPERVISOR" update > /dev/null 2>&1 || true
 sleep 2
-
-# Restart to pick up any config changes
 supervisorctl -c "$USER_SUPERVISOR" restart openclaw-gateway > /dev/null 2>&1 || \
   supervisorctl -c "$USER_SUPERVISOR" start openclaw-gateway > /dev/null 2>&1 || true
 sleep 5
 
-# Verify gateway is running
+# Trigger a local CLI connection to auto-pair the local device.
+# Without trustedProxies, the gateway sees 127.0.0.1 as a direct
+# local client → isLocalClient=true → silent pairing → auto-approved.
+echo "Pairing local device..."
+if openclaw gateway health > /dev/null 2>&1; then
+  echo "  Local device paired."
+else
+  echo "  Warning: local device pairing may have failed."
+  echo "  If the CLI doesn't work, run: openclaw gateway health"
+fi
+
+# ─── 5. Phase 2: Add trustedProxies, restart ─────────────────────────
+
+echo ""
+echo "Adding trustedProxies for Tailscale Serve (phase 2)..."
+
+node -e "
+  const fs = require('fs');
+  const cfg = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
+  cfg.gateway.trustedProxies = ['127.0.0.1/32'];
+  fs.writeFileSync(process.argv[1], JSON.stringify(cfg, null, 2) + '\n');
+" "$CONFIG"
+
+echo "  gateway.trustedProxies = [127.0.0.1/32]"
+
+echo "Restarting gateway (phase 2: Tailscale proxy support)..."
+supervisorctl -c "$USER_SUPERVISOR" restart openclaw-gateway > /dev/null 2>&1 || true
+sleep 5
+
 if supervisorctl -c "$USER_SUPERVISOR" status openclaw-gateway 2>/dev/null | grep -q RUNNING; then
   echo "  Gateway running (supervised)"
 else
@@ -200,12 +215,7 @@ else
   echo "  Logs:  tail /dev/shm/openclaw-gateway.log /dev/shm/openclaw-gateway_err.log"
 fi
 
-# Quick gateway health check
-echo ""
-echo "Gateway health:"
-openclaw gateway health 2>&1 | head -5 || echo "  (health check unavailable)"
-
-# ─── 4. Print access info ─────────────────────────────────────────────
+# ─── 6. Print access info ─────────────────────────────────────────────
 
 TS_HOSTNAME=$(tailscale status --json 2>/dev/null | node -pe "
   const s = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
