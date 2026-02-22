@@ -19,14 +19,19 @@ jobs:
         run: |
           PACKAGE_NAME=$(node -p "require('./package.json').name")
           LOCAL_VERSION=$(node -p "require('./package.json').version")
-          # Check both latest and next tags
           PUBLISHED_LATEST=$(npm view "$PACKAGE_NAME" version 2>/dev/null || echo "0.0.0")
           PUBLISHED_NEXT=$(npm view "$PACKAGE_NAME@next" version 2>/dev/null || echo "0.0.0")
-          if [ "$LOCAL_VERSION" != "$PUBLISHED_LATEST" ] && [ "$LOCAL_VERSION" != "$PUBLISHED_NEXT" ]; then
-            echo "Publishing $PACKAGE_NAME@$LOCAL_VERSION --tag next (latest=$PUBLISHED_LATEST)"
+          if [ "$LOCAL_VERSION" = "$PUBLISHED_LATEST" ] || [ "$LOCAL_VERSION" = "$PUBLISHED_NEXT" ]; then
+            echo "Version $LOCAL_VERSION already published, skipping."
+            exit 0
+          fi
+          # Prerelease versions (containing -) publish as @next, stable as @latest
+          if echo "$LOCAL_VERSION" | grep -q '-'; then
+            echo "Publishing $PACKAGE_NAME@$LOCAL_VERSION --tag next"
             npm publish --access public --tag next
           else
-            echo "Version $LOCAL_VERSION already published, skipping."
+            echo "Publishing $PACKAGE_NAME@$LOCAL_VERSION --tag latest"
+            npm publish --access public
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
