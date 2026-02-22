@@ -142,6 +142,39 @@ pkill -f "openclaw gateway run" 2>/dev/null || true
 pkill -f "openclaw-gateway" 2>/dev/null || true
 sleep 1
 
+# Register in /substrate_runtime_info.json so the Zo UI shows the service.
+RUNTIME_INFO="/substrate_runtime_info.json"
+if [ -f "$RUNTIME_INFO" ]; then
+  node -e "
+    const fs = require('fs');
+    const ri = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
+    ri.services ??= [];
+    if (!ri.services.some(s => s.name === 'openclaw-gateway')) {
+      ri.services.push({
+        name: 'openclaw-gateway',
+        entrypoint: 'openclaw gateway run',
+        port: 18789,
+        encrypted_port: false,
+        env_vars: {},
+        workdir: '/home/workspace',
+        is_user_defined: true,
+        supervisor_overrides: {
+          autorestart: 'true',
+          stdout_logfile_maxbytes: '10MB',
+          stopsignal: 'TERM',
+          stopasgroup: 'true',
+          killasgroup: 'true'
+        }
+      });
+      fs.writeFileSync(process.argv[1], JSON.stringify(ri, null, 2) + '\n');
+      console.log('  Added openclaw-gateway to runtime_info services');
+    } else {
+      console.log('  openclaw-gateway already in runtime_info services');
+    }
+  " "$RUNTIME_INFO"
+fi
+
+# Add supervisor program config
 if ! grep -q "\[program:openclaw-gateway\]" "$USER_SUPERVISOR" 2>/dev/null; then
   cat >> "$USER_SUPERVISOR" << 'SUPERVISOR'
 [program:openclaw-gateway]
@@ -164,6 +197,16 @@ SUPERVISOR
   echo "  Added [program:openclaw-gateway] to user supervisor"
 else
   echo "  [program:openclaw-gateway] already in user supervisor"
+fi
+
+# Notify Zo API about the service change
+HOST_KEY=$(node -pe "JSON.parse(require('fs').readFileSync('$RUNTIME_INFO','utf8')).tags?.host_key ?? ''" 2>/dev/null || true)
+if [ -n "$HOST_KEY" ]; then
+  curl -s -X POST https://api.zo.computer/snapshot \
+    -H "Content-Type: application/json" \
+    -d "{\"host_key\": \"$HOST_KEY\", \"reason\": \"openclaw_gateway_registered\"}" \
+    > /dev/null 2>&1 || true
+  echo "  Notified Zo API (snapshot)"
 fi
 
 # ─── 4. Phase 1: Start gateway, auto-pair local device ───────────────
