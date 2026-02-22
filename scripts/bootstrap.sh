@@ -215,12 +215,23 @@ else
   echo "  Logs:  tail /dev/shm/openclaw-gateway.log /dev/shm/openclaw-gateway_err.log"
 fi
 
-# ─── 6. Print access info ─────────────────────────────────────────────
+# ─── 6. Provision HTTPS certificate ───────────────────────────────────
 
 TS_HOSTNAME=$(tailscale status --json 2>/dev/null | node -pe "
   const s = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
   (s.Self.DNSName || '').replace(/\\.\$/g, '')
 " 2>/dev/null || true)
+
+if [ -n "$TS_HOSTNAME" ]; then
+  echo ""
+  echo "Provisioning HTTPS certificate..."
+  if tailscale cert "$TS_HOSTNAME" 2>/dev/null; then
+    echo "  Certificate ready for ${TS_HOSTNAME}"
+  else
+    echo "  Warning: certificate provisioning failed."
+    echo "  Ensure HTTPS certificates are enabled at https://login.tailscale.com/admin/dns"
+  fi
+fi
 
 echo ""
 echo "Ready!"
