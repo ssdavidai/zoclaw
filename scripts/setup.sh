@@ -27,20 +27,38 @@ step 1 "Tailscale auth key"
 ensure_secrets_file
 source "$SECRETS_FILE" 2>/dev/null || true
 
-if [ -n "${TAILSCALE_AUTHKEY:-}" ]; then
-  echo "  Found TAILSCALE_AUTHKEY in zo secrets, using existing key."
+echo ""
+echo "  Choose authentication method:"
+echo "    1) Auth key (reusable, 90-day expiry)"
+echo "    2) Interactive (browser-based, no key needed)"
+echo "    3) Skip (if already configured)"
+echo ""
+read -rp "  Choose option [1]: " auth_choice
+auth_choice="${auth_choice:-1}"
+
+if [ "$auth_choice" = "2" ]; then
+  echo "  Using interactive authentication..."
+  echo "  zotail will prompt you to open a browser URL."
+  # Don't set TAILSCALE_AUTHKEY - zotail will handle interactive auth
+elif [ "$auth_choice" = "3" ]; then
+  echo "  Skipping auth setup..."
 else
-  echo "  No TAILSCALE_AUTHKEY found in zo secrets."
-  echo "  Generate one at: https://login.tailscale.com/admin/settings/keys"
-  echo ""
-  read -rp "  Enter your Tailscale auth key: " ts_key
-  if [ -z "$ts_key" ]; then
-    echo "  Error: auth key cannot be empty."
-    exit 1
+  # Original auth key flow
+  if [ -n "${TAILSCALE_AUTHKEY:-}" ]; then
+    echo "  Found TAILSCALE_AUTHKEY in zo secrets, using existing key."
+  else
+    echo "  No TAILSCALE_AUTHKEY found in zo secrets."
+    echo "  Generate one at: https://login.tailscale.com/admin/settings/keys"
+    echo ""
+    read -rp "  Enter your Tailscale auth key: " ts_key
+    if [ -z "$ts_key" ]; then
+      echo "  Error: auth key cannot be empty."
+      exit 1
+    fi
+    echo "export TAILSCALE_AUTHKEY=\"${ts_key}\"" >> "$SECRETS_FILE"
+    export TAILSCALE_AUTHKEY="$ts_key"
+    echo "  Saved to zo secrets."
   fi
-  echo "export TAILSCALE_AUTHKEY=\"${ts_key}\"" >> "$SECRETS_FILE"
-  export TAILSCALE_AUTHKEY="$ts_key"
-  echo "  Saved to zo secrets."
 fi
 
 # ─── Step 2: Install and configure Tailscale via zotail ──────────────
