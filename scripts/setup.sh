@@ -48,7 +48,8 @@ fi
 step 2 "Tailscale (zotail)"
 
 echo "  Installing zotail@${NPM_TAG}..."
-npm install -g "@timothyjlaurent/zotail@${NPM_TAG}" 2>&1 | tail -1
+# Using linked zotail from source
+  # npm install -g "@timothyjlaurent/zotail@${NPM_TAG}" 2>&1 | tail -1
 
 echo "  Running zotail setup..."
 zotail setup
