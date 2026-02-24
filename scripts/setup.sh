@@ -65,7 +65,11 @@ echo "  Installing zotail@${NPM_TAG}..."
 npm install -g "@ssdavidai/zotail@${NPM_TAG}" 2>&1 | tail -1
 
 echo "  Running zotail setup..."
-zotail setup
+if [ "${auth_choice:-1}" = "2" ]; then
+  printf '2\n' | zotail setup
+else
+  zotail setup
+fi
 
 # ─── Step 3: Install OpenClaw ────────────────────────────────────────
 
