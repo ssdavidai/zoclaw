@@ -61,8 +61,8 @@ fi
 
 step 2 "Tailscale (zotail)"
 
-echo "  Installing zotail@${NPM_TAG}..."
-npm install -g "@ssdavidai/zotail@${NPM_TAG}" 2>&1 | tail -1
+# Using linked zotail from source (with interactive auth support)
+# npm install -g "@ssdavidai/zotail@${NPM_TAG}" 2>&1 | tail -1
 
 echo "  Running zotail setup..."
 if [ "${auth_choice:-1}" = "2" ]; then
