@@ -22,36 +22,54 @@ ensure_secrets_file() {
 
 # ─── Step 1: Tailscale auth key ──────────────────────────────────────
 
-step 1 "Tailscale auth key"
+# ─── Step 1: Tailscale authentication ──────────────────────────────────
+
+step 1 "Tailscale authentication"
 
 ensure_secrets_file
 source "$SECRETS_FILE" 2>/dev/null || true
 
 if [ -n "${TAILSCALE_AUTHKEY:-}" ]; then
-  echo "  Found TAILSCALE_AUTHKEY in zo secrets, using existing key."
+  echo "✓ Found TAILSCALE_AUTHKEY in zo secrets, using existing key."
 else
-  echo "  No TAILSCALE_AUTHKEY found in zo secrets."
-  echo "  Generate one at: https://login.tailscale.com/admin/settings/keys"
   echo ""
-  read -rp "  Enter your Tailscale auth key: " ts_key
-  if [ -z "$ts_key" ]; then
-    echo "  Error: auth key cannot be empty."
-    exit 1
+  echo "Choose authentication method:"
+  echo "  1) Auth key (reusable, 90-day expiry)"
+  echo "  2) Interactive (browser-based, no expiry)"
+  echo ""
+  read -rp "Choose option [1]: " auth_choice
+  auth_choice="${auth_choice:-1}"
+  
+  if [ "$auth_choice" = "2" ]; then
+    echo ""
+    echo "Interactive auth selected. You'll be asked to authorize in your browser."
+    echo ""
+  elif [ "$auth_choice" = "1" ]; then
+    echo ""
+    echo "Generate one at: https://login.tailscale.com/admin/settings/keys"
+    echo ""
+    read -rp "Enter your Tailscale auth key: " ts_key
+    if [ -z "$ts_key" ]; then
+      echo "Error: auth key cannot be empty."
+      exit 1
+    fi
+    echo "export TAILSCALE_AUTHKEY=\"${ts_key}\"" >> "$SECRETS_FILE"
+    export TAILSCALE_AUTHKEY="$ts_key"
+    echo "✓ Saved to zo secrets."
   fi
-  echo "export TAILSCALE_AUTHKEY=\"${ts_key}\"" >> "$SECRETS_FILE"
-  export TAILSCALE_AUTHKEY="$ts_key"
-  echo "  Saved to zo secrets."
 fi
-
-# ─── Step 2: Install and configure Tailscale via zotail ──────────────
 
 step 2 "Tailscale (zotail)"
 
-echo "  Installing zotail@${NPM_TAG}..."
-npm install -g "@ssdavidai/zotail@${NPM_TAG}" 2>&1 | tail -1
+# Using linked zotail from source (with interactive auth support)
+# npm install -g "@ssdavidai/zotail@${NPM_TAG}" 2>&1 | tail -1
 
 echo "  Running zotail setup..."
-zotail setup
+if [ "${auth_choice:-1}" = "2" ]; then
+  ZOTAIL_AUTH_CHOICE=2 zotail setup
+else
+  zotail setup
+fi
 
 # ─── Step 3: Install OpenClaw ────────────────────────────────────────
 
