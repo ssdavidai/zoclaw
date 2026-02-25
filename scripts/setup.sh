@@ -66,7 +66,7 @@ step 2 "Tailscale (zotail)"
 
 echo "  Running zotail setup..."
 if [ "${auth_choice:-1}" = "2" ]; then
-  printf '2\n' | zotail setup
+  ZOTAIL_AUTH_CHOICE=2 zotail setup
 else
   zotail setup
 fi
